@@ -12,24 +12,31 @@ log = logging.getLogger(__name__)
 def task(ctx, config):
     """
     Sync or skew clock
-
     This will initially sync the clocks.  Eventually it should let us also
     skew by some number of seconds.
-
     example::
-
         tasks:
         - clock:
         - ceph:
         - interactive:
-
     to sync.
-
     :param ctx: Context
     :param config: Configuration
     """
 
     log.info('Syncing clocks and checking initial clock skew...')
+
+    # for psi vm instances
+    for rem in ctx.cluster.remotes.keys():
+        if rem.is_vm and ctx.config.get('redhat'):
+            ntp = "/etc/ntp.conf"
+            if rem.os.version.startswith('8'):
+                ntp = "/etc/chrony.conf"
+            rem.sh("sudo sed -i '/server*/d' {conf_file}".format(conf_file=ntp))
+            rem.sh("sudo sed -i '/pool*/d' {conf_file}".format(conf_file=ntp))
+            rem.sh("echo 'server clock.corp.redhat.com iburst'"
+                   " | sudo tee -a {conf_file}".format(conf_file=ntp),
+                   check_status=False)
 
     run.wait(
         ctx.cluster.run(
@@ -77,7 +84,6 @@ def task(ctx, config):
 def check(ctx, config):
     """
     Run ntpq at the start and the end of the task.
-
     :param ctx: Context
     :param config: Configuration
     """
@@ -110,3 +116,4 @@ def check(ctx, config):
                 wait=False,
             )
         )
+
