@@ -252,7 +252,6 @@ def get_initial_tasks(lock, config, machine_type):
             {'internal.setup_base_repo': None},
             {'internal.setup_additional_repo': None},
             {'internal.setup_container_registry': None},
-            {'install': None},
         ])
         # Install latest kernel task for redhat downstream runs
         if config.get('redhat').get('install_latest_rh_kernel', False):
