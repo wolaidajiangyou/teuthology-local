@@ -154,6 +154,16 @@ def get_testdir(ctx=None):
     )
 
 
+def get_tmpdir():
+    """
+    :returns: A test directory
+    """
+    return config.get(
+        'tmp_path',
+        '/tmp/cephtest'
+    )
+
+
 def get_test_user(ctx=None):
     """
     :param ctx: Unused; accepted for compatibility
