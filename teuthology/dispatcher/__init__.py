@@ -179,6 +179,7 @@ def main(args):
 
     returncodes = set([0])
     for proc in job_procs:
+        log.info(f"proc {proc} returncode={proc.returncode}")
         if proc.returncode is not None:
             returncodes.add(proc.returncode)
     return max(returncodes)
