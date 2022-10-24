@@ -476,7 +476,8 @@ def find_git_parent(project, sha1):
         try:
             resp.raise_for_status()
         except Exception:
-            log.exception(f"git refresh failed for project {project}!")
+            log.error(f"git refresh failed for project {project}!")
+            raise
 
     def get_sha1s(project, committish, count):
         url = '/'.join((base_url, '%s.git' % project,
