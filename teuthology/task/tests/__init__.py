@@ -103,5 +103,5 @@ def task(ctx, config):
             log.info("OK. All tests passed!")
             set_status(ctx.summary, "pass")
         else:
-            log.error("FAIL. Saw test failures...")
+            log.error("FAIL (exit code {status}). Saw test failures...")
             set_status(ctx.summary, "fail")
