@@ -3,9 +3,6 @@ Paramiko run support
 """
 
 import io
-import os
-import yaml
-import collections
 
 from paramiko import ChannelFile
 
@@ -15,11 +12,10 @@ import socket
 import pipes
 import logging
 import shutil
-from lxml import etree
 
 from teuthology.contextutil import safe_while
 from teuthology.exceptions import (CommandCrashedError, CommandFailedError,
-                                   ConnectionLostError, UnitTestError)
+                                   ConnectionLostError)
 
 log = logging.getLogger(__name__)
 
@@ -38,13 +34,12 @@ class RemoteProcess(object):
         # for orchestra.remote.Remote to place a backreference
         'remote',
         'label',
-        'unittest_xml',
         ]
 
     deadlock_warning = "Using PIPE for %s without wait=False would deadlock"
 
     def __init__(self, client, args, check_status=True, hostname=None,
-                 label=None, timeout=None, wait=True, logger=None, cwd=None, unittest_xml=None):
+                 label=None, timeout=None, wait=True, logger=None, cwd=None):
         """
         Create the object. Does not initiate command execution.
 
@@ -62,8 +57,6 @@ class RemoteProcess(object):
         :param wait:         Whether self.wait() will be called automatically
         :param logger:       Alternative logger to use (optional)
         :param cwd:          Directory in which the command will be executed
-                             (optional)
-        :param unittest_xml: Absolute path to unit-tests output XML file  
                              (optional)
         """
         self.client = client
@@ -91,7 +84,6 @@ class RemoteProcess(object):
         self.returncode = self.exitstatus = None
         self._wait = wait
         self.logger = logger or log
-        self.unittest_xml = unittest_xml or ""
 
     def execute(self):
         """
@@ -186,19 +178,6 @@ class RemoteProcess(object):
                 # signal; sadly SSH does not tell us which signal
                 raise CommandCrashedError(command=self.command)
             if self.returncode != 0:
-                log.info("XML_DEBUG: self.unittest_xml " + self.unittest_xml)
-                if self.unittest_xml:
-                    error_msg = None
-                    try:
-                        error_msg = UnitTestFailure().get_error_msg(self.unittest_xml, self.client)
-                    except Exception as exc:
-                        self.logger.exception(exc)
-                        # self.logger.error('Unable to scan logs, exception occurred: {exc}'.format(exc=repr(exc)))
-                    if error_msg:
-                        raise UnitTestError(
-                            exitstatus=self.returncode, node=self.hostname, 
-                            label=self.label, message=error_msg
-                        )
                 raise CommandFailedError(
                     command=self.command, exitstatus=self.returncode,
                     node=self.hostname, label=self.label
@@ -242,106 +221,6 @@ class RemoteProcess(object):
             name=self.hostname,
             )
 
-class UnitTestFailure():
-    def __init__(self) -> None:
-        self.yaml_data = {}
-        self.client = None
-
-    def get_error_msg(self, xmlfile_path: str, client=None):
-        """
-        Find error message in xml file.
-        If xmlfile_path is a directory, parse all xml files.
-        """
-        if not xmlfile_path:
-            return "No XML file path was passed to process!"
-        self.client = client
-        error_message = None
-        log.info("XML_DEBUG: getting message...")
-
-        if xmlfile_path[-1] == "/": # directory
-            (_, stdout, _) = client.exec_command(f'ls -d {xmlfile_path}*.xml', timeout=200)
-            xml_files = stdout.read().decode().split('\n')
-            log.info("XML_DEBUG: xml_files are " + " ".join(xml_files))
-            
-            for file in xml_files:
-                error = self._parse_xml(file)
-                if not error_message:
-                    error_message = error
-            log.info("XML_DEBUG: Parsed all .xml files.")
-        elif os.path.splitext(xmlfile_path)[1] == ".xml": # xml file
-            error_message = self._parse_xml(xmlfile_path)
-
-        if error_message:
-            self.write_logs()
-            return error_message +  ' Information store in remote/unittest_failures.yaml'
-        log.info("XML_DEBUG: no error_message")
-
-    def _parse_xml(self, xml_path: str):
-        """ 
-        Load the XML file 
-        and parse for failures and errors.
-        Returns information about first failure/error occurance.
-        """
-
-        if not xml_path:
-            return None
-        try:
-            log.info("XML_DEBUG: open file " + xml_path)
-            # TODO: change to paramiko function
-            (_, stdout, _) = self.client.exec_command(f'cat {xml_path}', timeout=200)
-            if stdout:
-                tree = etree.parse(stdout)
-                log.info("XML_DEBUG: parsed.")
-                failed_testcases = tree.xpath('.//failure/.. | .//error/..')
-                if len(failed_testcases) == 0:
-                    log.debug("No failures or errors found in unit test's output xml file.")
-                    return None
-
-                error_data = collections.defaultdict(dict)
-                error_message = ""
-
-                for testcase in failed_testcases:
-                    testcase_name = testcase.get("name", "test-name")
-                    testcase_suitename = testcase.get("classname", "suite-name")
-                    for child in testcase:
-                        if child.tag in ['failure', 'error']:
-                            fault_kind = child.tag
-                            reason = child.get('message', 'NO MESSAGE FOUND IN XML FILE; CHECK LOGS.')
-                            reason = reason[:reason.find('begin captured')] # remove captured logs/stdout
-                            error_data[testcase_suitename][testcase_name] = {
-                                    "kind": fault_kind, 
-                                    "message": reason,
-                                }
-                            if not error_message:
-                                error_message = f'{fault_kind}: Test `{testcase_name}` of `{testcase_suitename}` because {reason}'
-
-                xml_filename = os.path.basename(xml_path)
-                self.yaml_data[xml_filename] = {
-                    "xml_file": xml_path, 
-                    "num_of_failures": len(failed_testcases), 
-                    "failures": dict(error_data) 
-                }
-
-                return error_message
-            else:
-                return f'XML output not found at `{str(xml_path)}`!'
-        except Exception as exc:
-            log.exception(exc)
-            raise Exception("Somthing went wrong while searching for error in XML file: " + repr(exc))
-    
-    def write_logs(self):
-        yamlfile = "/home/ubuntu/cephtest/archive/unittest_failures.yaml"
-        if self.yaml_data:
-            log.info(self.yaml_data)
-            try:
-                sftp = self.client.open_sftp()
-                remote_yaml_file = sftp.open(yamlfile, "w")
-                yaml.safe_dump(self.yaml_data, remote_yaml_file, default_flow_style=False)
-                remote_yaml_file.close()
-            except Exception as exc: 
-                log.exception(exc)
-                log.info("XML_DEBUG: write logs error: " + repr(exc))
-        log.info("XML_DEBUG: yaml_data is empty!")
 
 class Raw(object):
 
@@ -515,7 +394,6 @@ def run(
     quiet=False,
     timeout=None,
     cwd=None,
-    unittest_xml=None,
     # omit_sudo is used by vstart_runner.py
     omit_sudo=False
 ):
@@ -551,7 +429,6 @@ def run(
     :param timeout: timeout value for args to complete on remote channel of
                     paramiko
     :param cwd: Directory in which the command should be executed.
-    :param unittest_xml: Absolute path to unit-tests output XML file.  
     """
     try:
         transport = client.get_transport()
@@ -569,7 +446,7 @@ def run(
         log.info("Running command with timeout %d", timeout)
     r = RemoteProcess(client, args, check_status=check_status, hostname=name,
                       label=label, timeout=timeout, wait=wait, logger=logger,
-                      cwd=cwd, unittest_xml=unittest_xml)
+                      cwd=cwd)
     r.execute()
     r.setup_stdin(stdin)
     r.setup_output_stream(stderr, 'stderr', quiet)

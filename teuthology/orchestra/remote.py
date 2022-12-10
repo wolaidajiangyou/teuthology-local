@@ -10,7 +10,8 @@ from teuthology.orchestra import console
 from teuthology.orchestra.opsys import OS
 import teuthology.provision
 from teuthology import misc
-from teuthology.exceptions import CommandFailedError
+from teuthology.exceptions import CommandFailedError, UnitTestError
+from teuthology.util.xml_scanner import UnitTestScanner
 from teuthology.misc import host_shortname
 import errno
 import time
@@ -508,6 +509,26 @@ class Remote(RemoteShell):
             if not self.reconnect():
                 raise Exception(f'Cannot connect to remote host {self.shortname}')
         r = self._runner(client=self.ssh, name=self.shortname, **kwargs)
+        r.remote = self
+        return r
+
+    def run_unit_test(self, unittest_xml=None, **kwargs):
+        try:
+            r = self.run(**kwargs)
+        except CommandFailedError as exc:
+            log.info("XML_DEBUG: CommandFailedError exception found.")
+            if unittest_xml:
+                error_msg = None
+                try:
+                    error_msg = UnitTestScanner(client=self.ssh).get_error_msg(unittest_xml)
+                except Exception as scanner_exc:
+                    log.exception(scanner_exc)
+                if error_msg:
+                    raise UnitTestError(
+                        exitstatus=exc.exitstatus, node=exc.node, 
+                        label=exc.label, message=error_msg
+                    )
+            raise exc
         r.remote = self
         return r
 

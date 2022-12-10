@@ -223,8 +223,9 @@ class UnitTestError(Exception):
             prefix += " ({label})".format(label=self.label)
         if self.node:
             prefix += " on {node}".format(node=self.node)
-        return "{prefix} with status {status}: '{message}'".format(
+        if self.exitstatus:
+            prefix += " with status {status}".format(status=self.exitstatus)
+        return "{prefix}: '{message}'".format(
             prefix=prefix,
-            status=self.exitstatus,
             message=self.message,
         )
