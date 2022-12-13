@@ -37,16 +37,16 @@ class XMLScanner():
         (_, stdout, _) = self.client.exec_command(f'cat {path}', timeout=200)
         if stdout:
             xml_tree = etree.parse(stdout)
-            error_txt, error_data = self.get_error(xml_tree)
+            error_txt, error_data = self._get_error(xml_tree)
             if error_data:
                 error_data["xml_file"] = path
                 self.yaml_data += [error_data]
             return error_txt
         log.debug(f'XML output not found at `{str(path)}`!')
 
-    def get_error(self):
+    def _get_error(self):
         # defined in inherited classes
-        pass
+        return None, None
     
     def write_logs(self):
         yamlfile = self.yaml_path
@@ -84,7 +84,7 @@ class UnitTestScanner(XMLScanner):
             log.exception(exc)
             log.info("XML_DEBUG: get_error_msg: " + repr(exc))
 
-    def get_error(self, xml_tree):
+    def _get_error(self, xml_tree):
         """
         Returns message of first error found.
         And stores info of all errors in yaml_data. 
@@ -118,11 +118,40 @@ class UnitTestScanner(XMLScanner):
         
         return error_txt, { "failed_testsuites": dict(error_data), "num_of_failures": len(failed_testcases) }    
 
-
 class ValgrindScanner(XMLScanner):
     def __init__(self, client=None) -> None:
         super().__init__(client)
         self.yaml_path = "/home/ubuntu/cephtest/archive/valgrind.yaml"
 
-    def get_error(self, xml_tree):
-        pass 
+    def generate_yaml_summary(self):
+        try: 
+            self.scan_all_files_in_dir('/var/log/ceph/valgrind/', '*')
+        except Exception as exc:
+            log.exception(exc)
+            log.info("XML_DEBUG: get_error_msg: " + repr(exc))
+
+
+    def _get_error(self, xml_tree):
+        if not xml_tree:
+            return None, None
+        error_tree = xml_tree.find('error')
+
+        error_data = {
+            "kind": "",
+            "traceback": "",
+        }
+
+        kind = error_tree.find('kind')
+        error_data["kind"] = kind.text
+
+        error_traceback = []
+        stack = error_tree.find('stack')
+        for frame in stack:
+            if len(error_traceback) >= 5:
+                break 
+            fn = frame.find('fn')
+            error_traceback += [fn.text]
+        error_traceback_s = " \n".join(error_traceback)
+        error_data["traceback"] = error_traceback_s
+
+        return error_traceback_s, error_data
