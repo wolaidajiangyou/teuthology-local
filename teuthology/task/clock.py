@@ -41,16 +41,11 @@ def task(ctx, config):
     run.wait(
         cluster.run(
             args = [
-                'sudo', 'systemctl', 'stop', 'ntp.service', run.Raw('||'),
-                'sudo', 'systemctl', 'stop', 'ntpd.service', run.Raw('||'),
-                'sudo', 'systemctl', 'stop', 'chronyd.service',
+                'sudo', 'systemctl', 'start', 'ntpd.service', run.Raw('||'),
+                'sudo', 'systemctl', 'start', 'chronyd.service',
                 run.Raw(';'),
                 'sudo', 'ntpd', '-gq', run.Raw('||'),
                 'sudo', 'chronyc', 'makestep',
-                run.Raw(';'),
-                'sudo', 'systemctl', 'start', 'ntp.service', run.Raw('||'),
-                'sudo', 'systemctl', 'start', 'ntpd.service', run.Raw('||'),
-                'sudo', 'systemctl', 'start', 'chronyd.service',
                 run.Raw(';'),
                 'PATH=/usr/bin:/usr/sbin', 'ntpq', '-p', run.Raw('||'),
                 'PATH=/usr/bin:/usr/sbin', 'chronyc', 'sources',
